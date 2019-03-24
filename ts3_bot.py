@@ -1,22 +1,79 @@
-import asyncio
+import json
+import threading
 
-URI = "telnet://zedjones:PASSWORD@ts.traphouse.us:25639"
+from matrix_bot_api.matrix_bot_api import MatrixBotAPI
+from matrix_bot_api.mregex_handler import MRegexHandler
+from matrix_bot_api.mcommand_handler import MCommandHandler
+import ts3
 
-async def async_print(text):
-    print(text)
-
-async def async_test():
-    await asyncio.sleep(5)
-    print('tested')
+CONFIG_FILE = "bot_cfg.json"
+URI = None
 
 def main():
-    loop = asyncio.get_event_loop()
-    lst_of_tasks = [
-        async_print('start'),
-        async_test(),
-        async_print('end')
-    ]
-    loop.run_until_complete(asyncio.wait(lst_of_tasks))
+    global URI
+    config = json.loads(open("bot_cfg.json", 'r').read())
+    user, password, server = config["matrix_username"], config["matrix_pass"], config["matrix_server"]
+    URI = config["ts_uri"]
+    matrix_bot = setup_matrix_bot(user, password, server)
+    ts3_thread = threading.Thread(target=check_join_and_leave, args=(matrix_bot,))
+    ts3_thread.start()
+    ts3_thread.join()
+
+def setup_matrix_bot(username, password, server):
+    bot = MatrixBotAPI(username, password, server)
+
+    ts_online = MRegexHandler("ts", show_online_clients)
+    bot.add_handler(ts_online)
+
+    bot.start_polling()
+    
+    return bot
+
+def show_online_clients(room, event):
+    with ts3.query.TS3ServerConnection(URI) as ts3conn:
+        ts3conn.exec_("use", sid=1)
+
+        clients = []
+
+        for client in ts3conn.exec_("clientlist"):
+            if client.get("client_nickname") is not None and client.get("client_type") == "0":
+                print(client)
+                clients.append(client.get("client_nickname"))
+
+        room.send_text("Users online: " + ", ".join(clients))
+
+def check_join_and_leave(bot):
+    '''
+    :param bot: is a bot
+    :type bot: matrix_bot_api.matrix_bot_api.MatrixBotAPI
+    '''
+
+    # maps clid to client_nickname
+    online_clients = {}
+
+    with ts3.query.TS3ServerConnection(URI) as ts3conn:
+            ts3conn.exec_("use", sid=1)
+
+            # Register for events
+            ts3conn.exec_("servernotifyregister", event="server")
+
+            while True:
+                    ts3conn.send_keepalive()
+
+                    try:
+                        event = ts3conn.wait_for_event(timeout=60)
+                    except (ts3.query.TS3TimeoutError, ts3.query.TS3QueryError):
+                        pass
+                    else:
+                        # Greet new clients.
+                        if event[0]["reasonid"] == "0":
+                            if event[0]["client_type"] == '0':
+                                print("{} connected".format(event[0]["client_nickname"]))
+                                online_clients[event[0]["clid"]] = event[0]["client_nickname"]
+                                ts3conn.exec_("clientpoke", clid=event[0]["clid"], msg="Hello :)")
+                        elif event[0]["reasonid"] == "8":
+                            print("{} disconnected".format(online_clients.get(event[0]["clid"])))
+                            online_clients.pop(event[0]["clid"])
 
 if __name__ == '__main__':
     main()
