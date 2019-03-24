@@ -11,11 +11,15 @@ URI = None
 
 def main():
     global URI
+
     config = json.loads(open("bot_cfg.json", 'r').read())
     user, password, server = config["matrix_username"], config["matrix_pass"], config["matrix_server"]
     URI = config["ts_uri"]
+    event_rooms = config["event_rooms"]
+
     matrix_bot = setup_matrix_bot(user, password, server)
-    ts3_thread = threading.Thread(target=check_join_and_leave, args=(matrix_bot,))
+    ts3_thread = threading.Thread(target=check_join_and_leave, args=(matrix_bot, event_rooms))
+    
     ts3_thread.start()
     ts3_thread.join()
 
@@ -42,7 +46,7 @@ def show_online_clients(room, event):
 
         room.send_text("Users online: " + ", ".join(clients))
 
-def check_join_and_leave(bot):
+def check_join_and_leave(bot, send_rooms):
     '''
     :param bot: is a bot
     :type bot: matrix_bot_api.matrix_bot_api.MatrixBotAPI
@@ -50,6 +54,11 @@ def check_join_and_leave(bot):
 
     # maps clid to client_nickname
     online_clients = {}
+
+    room_objs = []
+
+    for send_room in send_rooms:
+        room_objs.append(bot.client.rooms.get(send_room))
 
     with ts3.query.TS3ServerConnection(URI) as ts3conn:
             ts3conn.exec_("use", sid=1)
@@ -68,11 +77,12 @@ def check_join_and_leave(bot):
                         # Greet new clients.
                         if event[0]["reasonid"] == "0":
                             if event[0]["client_type"] == '0':
-                                print("{} connected".format(event[0]["client_nickname"]))
+                                for room in room_objs:
+                                    room.send_text("{} connected".format(event[0]["client_nickname"]))
                                 online_clients[event[0]["clid"]] = event[0]["client_nickname"]
-                                ts3conn.exec_("clientpoke", clid=event[0]["clid"], msg="Hello :)")
                         elif event[0]["reasonid"] == "8":
-                            print("{} disconnected".format(online_clients.get(event[0]["clid"])))
+                            for room in room_objs:
+                                room.send_text("{} disconnected".format(online_clients.get(event[0]["clid"])))
                             online_clients.pop(event[0]["clid"])
 
 if __name__ == '__main__':
