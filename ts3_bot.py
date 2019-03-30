@@ -26,7 +26,7 @@ def main():
 def setup_matrix_bot(username, password, server):
     bot = MatrixBotAPI(username, password, server)
 
-    ts_online = MRegexHandler("ts", show_online_clients)
+    ts_online = MRegexHandler("^!ts", show_online_clients)
     bot.add_handler(ts_online)
 
     bot.start_polling()
@@ -82,8 +82,11 @@ def check_join_and_leave(bot, send_rooms):
                                 online_clients[event[0]["clid"]] = event[0]["client_nickname"]
                         elif event[0]["reasonid"] == "8":
                             for room in room_objs:
-                                room.send_text("{} disconnected".format(online_clients.get(event[0]["clid"])))
-                            online_clients.pop(event[0]["clid"])
+                                if event[0]["clid"] in online_clients:
+                                    room.send_text("{} disconnected".format(online_clients.get(event[0]["clid"])))
+                                    online_clients.pop(event[0]["clid"])
+                                else:
+                                    room.send_text("Somebody disconnected")
 
 if __name__ == '__main__':
     main()
