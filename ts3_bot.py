@@ -87,6 +87,13 @@ def check_join_and_leave(bot, send_rooms):
                                     online_clients.pop(event[0]["clid"])
                                 else:
                                     room.send_text("Somebody disconnected")
+                        elif event[0]["reasonid"] == "4" or event[0]["reasonid"] == "4":
+                            for room in room_objs:
+                                if event[0]["clid"] in online_clients:
+                                    room.send_text("{} was kicked".format(online_clients.get(event[0]["clid"])))
+                                    online_clients.pop(event[0]["clid"])
+                                else:
+                                    room.send_text("Somebody was kicked")
 
 if __name__ == '__main__':
     main()
