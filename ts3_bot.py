@@ -3,11 +3,11 @@ import threading
 
 from matrix_bot_api.matrix_bot_api import MatrixBotAPI
 from matrix_bot_api.mregex_handler import MRegexHandler
-from matrix_bot_api.mcommand_handler import MCommandHandler
 import ts3
 
 CONFIG_FILE = "bot_cfg.json"
 URI = None
+
 
 def main():
     global URI
@@ -19,9 +19,10 @@ def main():
 
     matrix_bot = setup_matrix_bot(user, password, server)
     ts3_thread = threading.Thread(target=check_join_and_leave, args=(matrix_bot, event_rooms))
-    
+
     ts3_thread.start()
     ts3_thread.join()
+
 
 def setup_matrix_bot(username, password, server):
     bot = MatrixBotAPI(username, password, server)
@@ -30,8 +31,9 @@ def setup_matrix_bot(username, password, server):
     bot.add_handler(ts_online)
 
     bot.start_polling()
-    
+
     return bot
+
 
 def show_online_clients(room, event):
     with ts3.query.TS3ServerConnection(URI) as ts3conn:
@@ -45,6 +47,7 @@ def show_online_clients(room, event):
                 clients.append(client.get("client_nickname"))
 
         room.send_text("Users online: " + ", ".join(clients))
+
 
 def check_join_and_leave(bot, send_rooms):
     '''
@@ -61,39 +64,40 @@ def check_join_and_leave(bot, send_rooms):
         room_objs.append(bot.client.rooms.get(send_room))
 
     with ts3.query.TS3ServerConnection(URI) as ts3conn:
-            ts3conn.exec_("use", sid=1)
+        ts3conn.exec_("use", sid=1)
 
-            # Register for events
-            ts3conn.exec_("servernotifyregister", event="server")
+        # Register for events
+        ts3conn.exec_("servernotifyregister", event="server")
 
-            while True:
-                    ts3conn.send_keepalive()
+        while True:
+            ts3conn.send_keepalive()
 
-                    try:
-                        event = ts3conn.wait_for_event(timeout=60)
-                    except (ts3.query.TS3TimeoutError, ts3.query.TS3QueryError):
-                        pass
-                    else:
-                        # Greet new clients.
-                        if event[0]["reasonid"] == "0":
-                            if event[0]["client_type"] == '0':
-                                for room in room_objs:
-                                    room.send_text("{} connected".format(event[0]["client_nickname"]))
-                                online_clients[event[0]["clid"]] = event[0]["client_nickname"]
-                        elif event[0]["reasonid"] == "8":
-                            for room in room_objs:
-                                if event[0]["clid"] in online_clients:
-                                    room.send_text("{} disconnected".format(online_clients.get(event[0]["clid"])))
-                                    online_clients.pop(event[0]["clid"])
-                                else:
-                                    room.send_text("Somebody disconnected")
-                        elif event[0]["reasonid"] == "4" or event[0]["reasonid"] == "4":
-                            for room in room_objs:
-                                if event[0]["clid"] in online_clients:
-                                    room.send_text("{} was kicked".format(online_clients.get(event[0]["clid"])))
-                                    online_clients.pop(event[0]["clid"])
-                                else:
-                                    room.send_text("Somebody was kicked")
+            try:
+                event = ts3conn.wait_for_event(timeout=60)
+            except (ts3.query.TS3TimeoutError, ts3.query.TS3QueryError):
+                pass
+            else:
+                # Greet new clients.
+                if event[0]["reasonid"] == "0":
+                    if event[0]["client_type"] == '0':
+                        for room in room_objs:
+                            room.send_text("{} connected".format(event[0]["client_nickname"]))
+                        online_clients[event[0]["clid"]] = event[0]["client_nickname"]
+                elif event[0]["reasonid"] == "8":
+                    for room in room_objs:
+                        if event[0]["clid"] in online_clients:
+                            room.send_text("{} disconnected".format(online_clients.get(event[0]["clid"])))
+                            online_clients.pop(event[0]["clid"])
+                        else:
+                            room.send_text("Somebody disconnected")
+                elif event[0]["reasonid"] == "4" or event[0]["reasonid"] == "4":
+                    for room in room_objs:
+                        if event[0]["clid"] in online_clients:
+                            room.send_text("{} was kicked".format(online_clients.get(event[0]["clid"])))
+                            online_clients.pop(event[0]["clid"])
+                        else:
+                            room.send_text("Somebody was kicked")
+
 
 if __name__ == '__main__':
     main()

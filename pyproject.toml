@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "ts3-matrix-bridge"
+version = "0.1.0"
+description = "A bridge that notifies a Matrix channel when users connect/disconnect from TS3"
+authors = ["Zedjones <dojoman19@gmail.com>"]
+license = "GPL-2"
+
+[tool.poetry.dependencies]
+python = "^3.8"
+matrix_bot_api = "^0.1"
+ts3 = "2.0.0b3"
+python-dotenv = "^0.14.0"
+preflyt = "^0.4.0"
+
+[tool.poetry.dev-dependencies]
+pylint = "^2.6.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
