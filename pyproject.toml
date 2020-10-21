@@ -14,6 +14,7 @@ preflyt = "^0.4.0"
 
 [tool.poetry.dev-dependencies]
 pylint = "^2.6.0"
+black = {version = "^20.8b1", allow-prereleases = true}
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
