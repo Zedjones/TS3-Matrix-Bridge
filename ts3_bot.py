@@ -58,10 +58,9 @@ def show_online_clients(room, _):
         room.send_text("Users online: " + ", ".join(clients))
 
 
-def check_join_and_leave(bot, send_rooms):
+def check_join_and_leave(bot: MatrixBotAPI, send_rooms):
     """
     :param bot: is a bot
-    :type bot: matrix_bot_api.matrix_bot_api.MatrixBotAPI
     """
 
     # maps clid to client_nickname
@@ -90,17 +89,13 @@ def check_join_and_leave(bot, send_rooms):
                 if event[0]["reasonid"] == "0":
                     if event[0]["client_type"] == "0":
                         for room in room_objs:
-                            room.send_text(
-                                "{} connected".format(event[0]["client_nickname"])
-                            )
+                            room.send_text(f"{event[0]['client_nickname']} connected")
                         online_clients[event[0]["clid"]] = event[0]["client_nickname"]
                 elif event[0]["reasonid"] == "8":
                     for room in room_objs:
                         if event[0]["clid"] in online_clients:
                             room.send_text(
-                                "{} disconnected".format(
-                                    online_clients.get(event[0]["clid"])
-                                )
+                                f"{online_clients.get(event[0]['clid'])} disconnected"
                             )
                             online_clients.pop(event[0]["clid"])
                         else:
@@ -109,9 +104,7 @@ def check_join_and_leave(bot, send_rooms):
                     for room in room_objs:
                         if event[0]["clid"] in online_clients:
                             room.send_text(
-                                "{} was kicked".format(
-                                    online_clients.get(event[0]["clid"])
-                                )
+                                f"{online_clients.get(event[0]['clid'])} was kicked"
                             )
                             online_clients.pop(event[0]["clid"])
                         else:
