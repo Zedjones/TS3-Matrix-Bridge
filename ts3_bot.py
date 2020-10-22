@@ -1,4 +1,3 @@
-import json
 import os
 import threading
 from typing import List
@@ -39,7 +38,7 @@ def main():
         os.getenv("MATRIX_SERVER"),
     )
     URI = os.getenv("TS_URI")
-    event_rooms = os.getenv("EVENT_ROOMS")
+    event_rooms = os.getenv("EVENT_ROOMS").split(",")
 
     matrix_bot = setup_matrix_bot(user, password, server)
     ts3_thread = threading.Thread(target=check_join_and_leave, args=(matrix_bot, event_rooms))
