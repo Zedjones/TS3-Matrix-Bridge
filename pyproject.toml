@@ -15,6 +15,26 @@ preflyt = "^0.4.0"
 [tool.poetry.dev-dependencies]
 pylint = "^2.6.0"
 black = {version = "^20.8b1", allow-prereleases = true}
+briefcase = "^0.3.3"
+
+[tool.briefcase]
+project_name = "My Project"
+bundle = "com.example"
+version = "0.1"
+
+[tool.briefcase.app.ts3_bot]
+formal_name = "ts3-matrix-bridge"
+description = "My first Briefcase App"
+sources = ['ts3_bot']
+requires = []
+
+[tool.briefcase.app.ts3_bot.linux]
+requires = [
+    "matrix_bot_api>=0.1",
+    "ts3==2.0.0b3",
+    "python-dotenv>=0.14.0",
+    "preflyt>=0.4.0",
+]
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
