@@ -1,27 +1,29 @@
 import os
 from typing import Dict, List, Optional
 
+import preflyt
 from dotenv import load_dotenv
 from matrix_bot_api.matrix_bot_api import MatrixBotAPI
 from matrix_bot_api.mregex_handler import MRegexHandler
 from matrix_client.room import Room
-
-import preflyt
+from paramiko import client
 from ts3API import Events
 from ts3API.TS3Connection import TS3Connection, TS3QueryException
 
 CONFIG_FILE = "bot_cfg.json"
 TS3_CONN: Optional[TS3Connection] = None
 MATRIX_ROOMS: List[Room] = []
+CONNECTED_CLIENTS: Dict[int, str] = {}
 
 
 def on_event(sender, **kw):
+    global CONNECTED_CLIENTS
+
     event = kw["event"]
     try:
         client_info = TS3_CONN.clientinfo(event.client_id)
-    # Ignore missing IDs, usually temp serverquery users
     except TS3QueryException:
-        return
+        pass
     channels = TS3_CONN.channellist()
     target_channel: Optional[Dict] = None
     text: Optional[str] = None
@@ -30,15 +32,17 @@ def on_event(sender, **kw):
         if channel["cid"] == str(event.target_channel_id):
             target_channel = channel
 
-    if client_info["client_type"] == "0":
+    if isinstance(event, Events.ClientLeftEvent):
+        text = f"{CONNECTED_CLIENTS.get(event.client_id, 'Somebody')} disconnected"
+        CONNECTED_CLIENTS.pop(event.client_id)
+    elif client_info["client_type"] == "0":
         if isinstance(event, Events.ClientMovedSelfEvent) or isinstance(
             event, Events.ClientMovedSelfEvent
         ):
             text = f"{client_info['client_nickname']} moved to {target_channel['channel_name']}"
         elif isinstance(event, Events.ClientEnteredEvent):
             text = f"{client_info['client_nickname']} connected"
-        elif isinstance(event, Events.ClientLeftEvent):
-            text = f"{client_info['client_nickname']} disconnected"
+            CONNECTED_CLIENTS[event.client_id] = client_info["client_nickname"]
         elif isinstance(event, Events.ClientKickedEvent):
             text = f"{client_info['client_nickname']}, get out!"
 
@@ -93,6 +97,7 @@ def main():
 
     ts3conn.register_for_server_events(on_event)
     ts3conn.register_for_channel_events(0, on_event)
+    ts3conn.register_for_unknown_events(on_event)
     ts3conn.start_keepalive_loop()
 
 
