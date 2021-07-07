@@ -1,6 +1,5 @@
 import os
-import threading
-from typing import List
+from typing import Dict, List, Optional
 
 from dotenv import load_dotenv
 from matrix_bot_api.matrix_bot_api import MatrixBotAPI
@@ -8,22 +7,59 @@ from matrix_bot_api.mregex_handler import MRegexHandler
 from matrix_client.room import Room
 
 import preflyt
-import ts3
+from ts3API import Events
+from ts3API.TS3Connection import TS3Connection, TS3QueryException
 
 CONFIG_FILE = "bot_cfg.json"
-URI = None
+TS3_CONN: Optional[TS3Connection] = None
+MATRIX_ROOMS: List[Room] = []
+
+
+def on_event(sender, **kw):
+    event = kw["event"]
+    try:
+        client_info = TS3_CONN.clientinfo(event.client_id)
+    # Ignore missing IDs, usually temp serverquery users
+    except TS3QueryException:
+        return
+    channels = TS3_CONN.channellist()
+    target_channel: Optional[Dict] = None
+    text: Optional[str] = None
+
+    for channel in channels:
+        if channel["cid"] == str(event.target_channel_id):
+            target_channel = channel
+
+    if client_info["client_type"] == "0":
+        if isinstance(event, Events.ClientMovedSelfEvent) or isinstance(
+            event, Events.ClientMovedSelfEvent
+        ):
+            text = f"{client_info['client_nickname']} moved to {target_channel['channel_name']}"
+        elif isinstance(event, Events.ClientEnteredEvent):
+            text = f"{client_info['client_nickname']} connected"
+        elif isinstance(event, Events.ClientLeftEvent):
+            text = f"{client_info['client_nickname']} disconnected"
+        elif isinstance(event, Events.ClientKickedEvent):
+            text = f"{client_info['client_nickname']}, get out!"
+
+    if text is not None:
+        for room in MATRIX_ROOMS:
+            room.send_text(text)
 
 
 def main():
     load_dotenv()
     global URI
+    global TS3_CONN
 
     ok, _ = preflyt.check(
         [
             {"checker": "env", "name": "MATRIX_USERNAME"},
             {"checker": "env", "name": "MATRIX_PASS"},
             {"checker": "env", "name": "MATRIX_SERVER"},
-            {"checker": "env", "name": "TS_URI"},
+            {"checker": "env", "name": "TS_HOST"},
+            {"checker": "env", "name": "TS_USERNAME"},
+            {"checker": "env", "name": "TS_PASSWORD"},
             {"checker": "env", "name": "EVENT_ROOMS"},
         ]
     )
@@ -37,14 +73,27 @@ def main():
         os.getenv("MATRIX_PASS"),
         os.getenv("MATRIX_SERVER"),
     )
-    URI = os.getenv("TS_URI")
+    ts_user, ts_password, ts_server = (
+        os.getenv("TS_USERNAME"),
+        os.getenv("TS_PASSWORD"),
+        os.getenv("TS_HOST"),
+    )
     event_rooms = os.getenv("EVENT_ROOMS").split(",")
 
     matrix_bot = setup_matrix_bot(user, password, server)
-    ts3_thread = threading.Thread(target=check_join_and_leave, args=(matrix_bot, event_rooms))
 
-    ts3_thread.start()
-    ts3_thread.join()
+    ts3conn = TS3Connection(ts_server)
+    ts3conn.login(ts_user, ts_password)
+    ts3conn.use(1)
+
+    TS3_CONN = ts3conn
+
+    for send_room in event_rooms:
+        MATRIX_ROOMS.append(matrix_bot.client.rooms.get(send_room))
+
+    ts3conn.register_for_server_events(on_event)
+    ts3conn.register_for_channel_events(0, on_event)
+    ts3conn.start_keepalive_loop()
 
 
 def setup_matrix_bot(username, password, server):
@@ -59,66 +108,13 @@ def setup_matrix_bot(username, password, server):
 
 
 def show_online_clients(room: Room, _):
-    with ts3.query.TS3ServerConnection(URI) as ts3conn:
-        ts3conn.exec_("use", sid=1)
+    clients = TS3_CONN.clientlist()
+    actual_clients = []
+    for client in clients:
+        if client["client_nickname"] is not None and client["client_type"] == "0":
+            actual_clients.append(client["client_nickname"])
 
-        clients = []
-
-        for client in ts3conn.exec_("clientlist"):
-            if client.get("client_nickname") is not None and client.get("client_type") == "0":
-                print(client)
-                clients.append(client.get("client_nickname"))
-
-        room.send_text("Users online: " + ", ".join(clients))
-
-
-def check_join_and_leave(bot: MatrixBotAPI, send_rooms: List[str]):
-    """
-    :param bot: is a bot
-    """
-
-    # maps clid to client_nickname
-    online_clients = {}
-
-    room_objs: List[Room] = []
-
-    for send_room in send_rooms:
-        room_objs.append(bot.client.rooms.get(send_room))
-
-    with ts3.query.TS3ServerConnection(URI) as ts3conn:
-        ts3conn.exec_("use", sid=1)
-
-        # Register for events
-        ts3conn.exec_("servernotifyregister", event="server")
-
-        while True:
-            ts3conn.send_keepalive()
-
-            try:
-                event = ts3conn.wait_for_event(timeout=60)
-            except (ts3.query.TS3TimeoutError, ts3.query.TS3QueryError):
-                pass
-            else:
-                room_text = ""
-                # Greet new clients.
-                if event[0]["reasonid"] == "0" and event[0]["client_type"] == "0":
-                    room_text = f"{event[0]['client_nickname']} connected"
-                    online_clients[event[0]["clid"]] = event[0]["client_nickname"]
-                elif event[0]["reasonid"] == "8":
-                    if event[0]["clid"] in online_clients:
-                        room_text = f"{online_clients.get(event[0]['clid'])} disconnected"
-                        online_clients.pop(event[0]["clid"])
-                    else:
-                        room_text = "Somebody disconnected"
-                elif event[0]["reasonid"] == "4":
-                    if event[0]["clid"] in online_clients:
-                        room_text = f"{online_clients.get(event[0]['clid'])} was kicked"
-                        online_clients.pop(event[0]["clid"])
-                    else:
-                        room_text = "Somebody was kicked"
-                if room_text != "":
-                    for room in room_objs:
-                        room.send_text(room_text)
+    room.send_text("Users online: " + ", ".join(actual_clients))
 
 
 if __name__ == "__main__":
