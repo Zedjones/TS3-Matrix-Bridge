@@ -1,60 +1,67 @@
+import asyncio
 import os
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 import preflyt
+import simplematrixbotlib as botlib
 from dotenv import load_dotenv
-from matrix_bot_api.matrix_bot_api import MatrixBotAPI
-from matrix_bot_api.mregex_handler import MRegexHandler
-from matrix_client.room import Room
-from paramiko import client
+from nio.rooms import MatrixRoom
 from ts3API import Events
-from ts3API.TS3Connection import TS3Connection, TS3QueryException
-
-CONFIG_FILE = "bot_cfg.json"
-TS3_CONN: Optional[TS3Connection] = None
-MATRIX_ROOMS: List[Room] = []
-CONNECTED_CLIENTS: Dict[int, str] = {}
+from ts3API.TS3Connection import TS3Connection
 
 
-def on_event(sender, **kw):
-    global CONNECTED_CLIENTS
+def create_event_handler(
+    bot: botlib.Bot, event_rooms: List[str], ts3_conn: TS3Connection
+) -> Callable[[str], None]:
+    def on_event(_, **kw):
 
-    event = kw["event"]
-    try:
-        client_info = TS3_CONN.clientinfo(event.client_id)
-    except TS3QueryException:
-        pass
-    channels = TS3_CONN.channellist()
-    target_channel: Optional[Dict] = None
-    text: Optional[str] = None
+        matrix_rooms: List[MatrixRoom] = []
 
-    for channel in channels:
-        if channel["cid"] == str(event.target_channel_id):
-            target_channel = channel
+        for send_room in event_rooms:
+            matrix_rooms.append(bot.api.async_client.rooms[send_room])
 
-    if isinstance(event, Events.ClientLeftEvent):
-        text = f"{CONNECTED_CLIENTS.get(event.client_id, 'Somebody')} disconnected"
-        CONNECTED_CLIENTS.pop(event.client_id)
-    elif client_info["client_type"] == "0":
-        if isinstance(event, Events.ClientMovedSelfEvent) or isinstance(
-            event, Events.ClientMovedSelfEvent
-        ):
-            text = f"{client_info['client_nickname']} moved to {target_channel['channel_name']}"
-        elif isinstance(event, Events.ClientEnteredEvent):
-            text = f"{client_info['client_nickname']} connected"
-            CONNECTED_CLIENTS[event.client_id] = client_info["client_nickname"]
-        elif isinstance(event, Events.ClientKickedEvent):
-            text = f"{client_info['client_nickname']}, get out!"
+        event = kw["event"]
+        channels = ts3_conn.channellist()
+        target_channel: Optional[Dict] = None
+        text: Optional[str] = None
 
-    if text is not None:
-        for room in MATRIX_ROOMS:
-            room.send_text(text)
+        connected_clients: Dict[int, str] = {}
+
+        for channel in channels:
+            if channel["cid"] == str(event.target_channel_id):
+                target_channel = channel
+
+        if isinstance(event, Events.ClientLeftEvent):
+            text = f"{connected_clients.get(event.client_id, 'Somebody')} disconnected"
+            connected_clients.pop(event.client_id, None)
+        else:
+            client_info = ts3_conn.clientinfo(event.client_id)
+            if client_info["client_type"] == "0":
+                if isinstance(event, Events.ClientMovedSelfEvent) or isinstance(
+                    event, Events.ClientMovedEvent
+                ):
+                    channel_name = (
+                        "a different channel"
+                        if target_channel is None
+                        else target_channel["channel_name"]
+                    )
+                    text = f"{client_info['client_nickname']} moved to {channel_name}"
+                elif isinstance(event, Events.ClientEnteredEvent):
+                    text = f"{client_info['client_nickname']} connected"
+                    connected_clients[event.client_id] = client_info["client_nickname"]
+                elif isinstance(event, Events.ClientKickedEvent):
+                    text = f"{client_info['client_nickname']}, get out!"
+
+        loop = asyncio.get_event_loop()
+        if text is not None:
+            for room in matrix_rooms:
+                loop.run_until_complete(bot.api.send_text_message(room.room_id, text))
+
+    return on_event
 
 
 def main():
     load_dotenv()
-    global URI
-    global TS3_CONN
 
     ok, _ = preflyt.check(
         [
@@ -84,42 +91,69 @@ def main():
     )
     event_rooms = os.getenv("EVENT_ROOMS").split(",")
 
-    matrix_bot = setup_matrix_bot(user, password, server)
+    creds = botlib.Creds(server, user, password)
+    bot = botlib.Bot(creds)
 
     ts3conn = TS3Connection(ts_server)
     ts3conn.login(ts_user, ts_password)
     ts3conn.use(1)
 
-    TS3_CONN = ts3conn
+    new_online_clients = show_online_clients_wrapper(bot, ts3conn)
+    bot.add_message_listener(new_online_clients)
+    poke_client = poke_client_wrapper(bot, ts3conn)
+    bot.add_message_listener(poke_client)
 
-    for send_room in event_rooms:
-        MATRIX_ROOMS.append(matrix_bot.client.rooms.get(send_room))
+    event_handler = create_event_handler(bot, event_rooms, ts3conn)
 
-    ts3conn.register_for_server_events(on_event)
-    ts3conn.register_for_channel_events(0, on_event)
-    ts3conn.register_for_unknown_events(on_event)
+    ts3conn.register_for_server_events(event_handler, False)
+    ts3conn.register_for_channel_events(0, event_handler, False)
+    ts3conn.register_for_unknown_events(event_handler, False)
     ts3conn.start_keepalive_loop()
 
-
-def setup_matrix_bot(username, password, server):
-    bot = MatrixBotAPI(username, password, server)
-
-    ts_online = MRegexHandler("^!ts", show_online_clients)
-    bot.add_handler(ts_online)
-
-    bot.start_polling()
-
-    return bot
+    bot.run()
 
 
-def show_online_clients(room: Room, _):
-    clients = TS3_CONN.clientlist()
-    actual_clients = []
-    for client in clients:
-        if client["client_nickname"] is not None and client["client_type"] == "0":
-            actual_clients.append(client["client_nickname"])
+def show_online_clients_wrapper(bot: botlib.Bot, ts3_conn: TS3Connection):
+    async def show_online_clients(room: MatrixRoom, message: str):
+        match = botlib.MessageMatch(room, message, bot)
+        if match.not_from_this_bot() and match.prefix("!") and match.command("ts"):
+            clients = ts3_conn.clientlist()
+            actual_clients = []
+            for client in clients:
+                if (
+                    client["client_nickname"] is not None
+                    and client["client_type"] == "0"
+                ):
+                    actual_clients.append(client["client_nickname"])
+            await bot.api.send_text_message(
+                room.room_id, f"Users online: {', '.join(actual_clients)}"
+            )
 
-    room.send_text("Users online: " + ", ".join(actual_clients))
+    return show_online_clients
+
+
+def poke_client_wrapper(bot: botlib.Bot, ts3_conn: TS3Connection):
+    async def poke_client(room: MatrixRoom, message: str):
+        match = botlib.MessageMatch(room, message, bot)
+        if match.not_from_this_bot() and match.prefix("!") and match.command("poke"):
+            try:
+                _, username, message = match.args.split('"', 2)
+                user = None
+                for client in ts3_conn.clientlist():
+                    if client["client_nickname"].lower() == username.lower():
+                        user = client
+                if user is None:
+                    await bot.api.send_text_message(
+                        room.room_id, f"User {username} is not online!"
+                    )
+                    return
+                ts3_conn.clientpoke(user["clid"], message[1::])
+            except ValueError:
+                await bot.api.send_text_message(
+                    room.room_id, "Command was improperly formatted!"
+                )
+
+    return poke_client
 
 
 if __name__ == "__main__":
