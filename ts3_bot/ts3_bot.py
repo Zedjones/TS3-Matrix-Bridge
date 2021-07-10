@@ -52,10 +52,12 @@ def create_event_handler(
                 elif isinstance(event, Events.ClientKickedEvent):
                     text = f"{client_info['client_nickname']}, get out!"
 
-        loop = asyncio.get_event_loop()
+        loop = bot.api.async_client.client_session.loop
+        asyncio.set_event_loop(loop)
         if text is not None:
             for room in matrix_rooms:
-                loop.run_until_complete(bot.api.send_text_message(room.room_id, text))
+                task = loop.create_task(bot.api.send_text_message(room.room_id, text))
+                asyncio.ensure_future(task, loop=loop)
 
     return on_event
 
