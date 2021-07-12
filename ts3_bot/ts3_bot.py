@@ -13,6 +13,8 @@ from ts3API.TS3Connection import TS3Connection
 def create_event_handler(
     bot: botlib.Bot, event_rooms: List[str], ts3_conn: TS3Connection
 ) -> Callable[[str], None]:
+    connected_clients: Dict[int, str] = {}
+
     def on_event(_, **kw):
 
         matrix_rooms: List[MatrixRoom] = []
@@ -24,8 +26,6 @@ def create_event_handler(
         channels = ts3_conn.channellist()
         target_channel: Optional[Dict] = None
         text: Optional[str] = None
-
-        connected_clients: Dict[int, str] = {}
 
         for channel in channels:
             if channel["cid"] == str(event.target_channel_id):
