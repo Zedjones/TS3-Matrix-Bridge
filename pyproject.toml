@@ -14,7 +14,7 @@ simplematrixbotlib = "^1.5.1"
 
 [tool.poetry.dev-dependencies]
 pylint = "^2.6.0"
-black = {version = "^20.8b1", allow-prereleases = true}
+black = {version = "^24.3", allow-prereleases = true}
 briefcase = "^0.3.3"
 
 [tool.briefcase]
